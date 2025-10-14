@@ -79,42 +79,39 @@ def capture_audio_to_temp(seconds=RECORD_SECONDS):
     return wav_path, rms, seconds
 
 # Open eyes
-def open_camera(index=0, backend=None):
-    """
-    Opens the webcam safely on Windows and Linux.
-    Tries multiple backends so it's less likely to fail.
-    """
-    if backend is None and os.name == "nt":
-        backend = cv2.CAP_DSHOW
+#def open_camera(index=0, backend=None):
+#    """
+#    Opens the webcam safely on Windows and Linux.
+#    Tries multiple backends so it's less likely to fail.
+#    """
+#    if backend is None and os.name == "nt":
+#        backend = cv2.CAP_DSHOW
+#
+#    cap = cv2.VideoCapture(index if backend is None else index, backend or 0)
+#    if not cap.isOpened():
+#        if os.name == "nt" and backend != cv2.CAP_MSMF:
+#            cap = cv2.VideoCapture(index, cv2.CAP_MSMF)
+#
+#    if not cap.isOpened():
+#        raise RuntimeError("❌ Camera not accessible. Check if another app is using it.")
 
-    cap = cv2.VideoCapture(index if backend is None else index, backend or 0)
-    if not cap.isOpened():
-        if os.name == "nt" and backend != cv2.CAP_MSMF:
-            cap = cv2.VideoCapture(index, cv2.CAP_MSMF)
-
-    if not cap.isOpened():
-        raise RuntimeError("âŒ Camera not accessible. Check if another app is using it.")
-
-    print("📷 Warming up camera (2s) 🛠️", end="", flush=True)
-    start_time = time.time()
-    while time.time() - start_time < 2.0:
-        cap.read()
-        time.sleep(0.05)
-    print(" done!")
-
-    return cap
-
+#    print("📷 Warming up camera (2s) 🛠️", end="", flush=True)
+#    start_time = time.time()
+#    while time.time() - start_time < 2.0:
+#        cap.read()
+#        time.sleep(0.05)
+#    print(" done!")
+#   return cap
+#cam = open_camera()
 # Warmup eyes
-def warmup_camera(cap, frames=10, delay=0.1):
-    """Discard first few frames so exposure and focus settle."""
-    print("📷 Warming up camera ⚙️", end="", flush=True)
-    for _ in range(frames):
-        cap.read()
-        time.sleep(delay)
-    print(" done!")
-
-cam = open_camera()
-warmup_camera(cam, frames=20, delay=0.05)  
+#def warmup_camera(cap, frames=10, delay=0.1):
+#    """Discard first few frames so exposure and focus settle."""
+#    print("📷 Warming up camera ", end="", flush=True)
+#    for _ in range(frames):
+#        cap.read()
+#        time.sleep(delay)
+#    print(" done!")
+#warmup_camera(cam, frames=20, delay=0.05)  
 
 def wait_for_enter_blocking():
     print("\n🔴 Press Enter to capture…", flush=True)
@@ -144,12 +141,17 @@ for name, path in YOLO_MODELS.items():
         print(f"❌ Could not load {name}: {e}")
 print(f"👜 Total models loaded: {len(models)}")
 
-def get_multi_vision_summary(conf=0.4):
+def get_multi_vision_summary(conf=0.3):
+    cam = cv2.VideoCapture(0)
     """Run multiple YOLO models on a single frame and combine results.
        Returns (summary_text, total_object_count)."""
     try:
         if not cam.isOpened():
             raise RuntimeError("Camera not accessible.")
+
+        # 🔸 Wait for LED/sensor to warm up
+        time.sleep(2.5)  # 2–3 s is usually enough for most webcams
+
         ok, frame = cam.read()
         if not ok or frame is None:
             raise RuntimeError("Failed to capture frame.")
@@ -199,12 +201,10 @@ def get_collection(name: Optional[str] = CHROMA_COLLECTION):
 
 col = get_collection()
 print(f"📖 Using collection: {col.name}")
-
 embedder = SentenceTransformer(EMBED_MODEL)
 
 # System prompt
 def load_system_prompt_plain(path=SYSTEM_PROMPT_PATH):
-    # Read the file as plain UTF-8 text (no base64).
     if not os.path.exists(path):
         print(f"❌ No system prompt found at {path}, using fallback.")
         return "You are AstraMech. Be concise and factual."
