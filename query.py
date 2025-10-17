@@ -10,8 +10,11 @@ from ultralytics import YOLO
 from ultralytics import YOLO
 import os, tempfile
 import threading, sys, time
+import subprocess
+from pathlib import Path
 # ---------- CONFIG ----------
 LMSTUDIO_URL   = "http://127.0.0.1:1234/v1/chat/completions"
+PARSE_VISION_PATH = Path(r"C:\astramech\parse-vision.py")  # adjust path if needed
 LMSTUDIO_MODEL = "astral_cortex"
 TTS_VOICE      = r"C:\memcore\voice.onnx"
 ASR_MODEL      = "tiny.en"
@@ -29,15 +32,12 @@ MIN_SILENCE_BYPASS = False
 MIN_VISUAL_OBJECTS = 1  # require at least this many detections to count as "visual activity"
 OBSERVER_MODE = False   # only talk when there's something (audio OR visual)
 CHATTER_MODE  = True  # talk even on manual trigger; still skips if you want (see logic below)
-
-YOLO_MODELS = {
-    "object": "8n.pt",
-    "holding a": "v8_detect_guns.pt",
-}
 # --------------------------------
 if OBSERVER_MODE and CHATTER_MODE:
     raise ValueError("Choose only one: set either OBSERVER_MODE or CHATTER_MODE to True, not both.")
 enter_event = threading.Event()
+
+## --------------- ENTER LISTENER ----------
 
 def _enter_listener():
     while True:
@@ -56,6 +56,23 @@ def wait_or_enter(timeout_sec: float) -> bool:
     if triggered:
         enter_event.clear()
     return triggered
+# ------------------------------------------
+
+# ------------------- Vision summary --------
+def get_vision_summary_from_json(max_objs=3, timeout=1.5):
+    """Call parse-vision.py to convert the latest JSON into human-readable text."""
+    py = sys.executable or "python"
+    cmd = [py, str(PARSE_VISION_PATH), "--max-objs", str(max_objs)]
+    try:
+        out = subprocess.run(
+            cmd, check=False, stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, text=True, timeout=timeout
+        )
+        phrase = (out.stdout or "").strip()
+        return phrase if phrase else "You are currently seeing: nothing."
+    except Exception:
+        return "You are currently seeing: nothing."
+# --------------------------------------------
 
 def compute_rms(x: np.ndarray) -> float:
     if x is None or x.size == 0:
@@ -65,7 +82,7 @@ def compute_rms(x: np.ndarray) -> float:
         x = x.mean(axis=1)
     return float(np.sqrt(np.mean(np.square(x))))
 
-# Listen
+# ---------------- Listen --------------------
 def capture_audio_to_temp(seconds=RECORD_SECONDS):
     """Record audio, write to a temp wav, return (wav_path, rms, duration_sec)."""
     print(f"⏺️ Auto-recording {seconds} ⚙️")
@@ -78,116 +95,31 @@ def capture_audio_to_temp(seconds=RECORD_SECONDS):
     print(f"✍🏻 Recorded (RMS={rms:.5f})")
     return wav_path, rms, seconds
 
-# Open eyes
-#def open_camera(index=0, backend=None):
-#    """
-#    Opens the webcam safely on Windows and Linux.
-#    Tries multiple backends so it's less likely to fail.
-#    """
-#    if backend is None and os.name == "nt":
-#        backend = cv2.CAP_DSHOW
-#
-#    cap = cv2.VideoCapture(index if backend is None else index, backend or 0)
-#    if not cap.isOpened():
-#        if os.name == "nt" and backend != cv2.CAP_MSMF:
-#            cap = cv2.VideoCapture(index, cv2.CAP_MSMF)
-#
-#    if not cap.isOpened():
-#        raise RuntimeError("❌ Camera not accessible. Check if another app is using it.")
-
-#    print("📷 Warming up camera (2s) 🛠️", end="", flush=True)
-#    start_time = time.time()
-#    while time.time() - start_time < 2.0:
-#        cap.read()
-#        time.sleep(0.05)
-#    print(" done!")
-#   return cap
-#cam = open_camera()
-# Warmup eyes
-#def warmup_camera(cap, frames=10, delay=0.1):
-#    """Discard first few frames so exposure and focus settle."""
-#    print("📷 Warming up camera ", end="", flush=True)
-#    for _ in range(frames):
-#        cap.read()
-#        time.sleep(delay)
-#    print(" done!")
-#warmup_camera(cam, frames=20, delay=0.05)  
-
 def wait_for_enter_blocking():
     print("\n🔴 Press Enter to capture…", flush=True)
     enter_event.clear()
     enter_event.wait()   # blocks until Enter is pressed
 
-# Check eyes
+# -------------- eye check ---------------------
 def has_visual_activity(summary_text: str) -> bool:
     """Return True if the YOLO summary indicates something was detected."""
     return "nothing" not in summary_text.lower()
 
-# Check ears
+# ----------------------- loudness check -------
 def has_audio_activity(rms: float, transcript: str) -> bool:
     """Audio is present if RMS crosses threshold OR Whisper heard something (configurable)."""
     heard_text = bool((transcript or "").strip())
     loud_enough = rms >= AUDIO_RMS_THRESH
     return (heard_text or loud_enough) if MIN_SILENCE_BYPASS else loud_enough
 
-# Load eye brainstuff
-print("👁️ Loading YOLO models...")
-models = {}
-for name, path in YOLO_MODELS.items():
-    try:
-        models[name] = YOLO(path)
-        print(f"⚙️ Loaded {name}: {path}")
-    except Exception as e:
-        print(f"❌ Could not load {name}: {e}")
-print(f"👜 Total models loaded: {len(models)}")
 
-def get_multi_vision_summary(conf=0.3):
-    cam = cv2.VideoCapture(0)
-    """Run multiple YOLO models on a single frame and combine results.
-       Returns (summary_text, total_object_count)."""
-    try:
-        if not cam.isOpened():
-            raise RuntimeError("Camera not accessible.")
 
-        # 🔸 Wait for LED/sensor to warm up
-        time.sleep(2.5)  # 2–3 s is usually enough for most webcams
-
-        ok, frame = cam.read()
-        if not ok or frame is None:
-            raise RuntimeError("Failed to capture frame.")
-
-        all_detections = {}
-        total_objs = 0
-
-        for name, model in models.items():
-            try:
-                res = model.predict(frame, conf=conf, verbose=False)[0]
-                names = model.model.names if hasattr(model.model, "names") else model.names
-                labels = [names[int(b.cls)] for b in res.boxes]
-                total_objs += len(labels)
-                if labels:
-                    all_detections[name] = Counter(labels)
-            except Exception as inner:
-                print(f"❌ {name} detection error: {inner}")
-
-        if total_objs == 0:
-            return "You are currently seeing: nothing.", 0
-
-        parts = []
-        for name, objs in all_detections.items():
-            parts.append(f"{name}: " + ", ".join([f"{k}Ã—{v}" for k, v in objs.items()]))
-        return "You are currently seeing: " + " | ".join(parts) + ".", total_objs
-
-    except Exception as e:
-        print("❌ Vision error:", e)
-        return "You are currently seeing: nothing.", 0
-
-# Load voice
+# ----------------- Load voice -----------
 print("👄 Loading ASR + TTS models...")
 whisper = WhisperModel(ASR_MODEL, device="cpu", compute_type="int8")
 voice   = PiperVoice.load(TTS_VOICE)
 
-# Knowledge and instincts
+# ------------- initiate chromaDB : check if you have a brain HA HA HA ----
 print(f"📚 Connecting to Chroma (persistent) at: {CHROMA_PATH}")
 client  = chromadb.PersistentClient(path=CHROMA_PATH)
 
@@ -203,7 +135,7 @@ col = get_collection()
 print(f"📖 Using collection: {col.name}")
 embedder = SentenceTransformer(EMBED_MODEL)
 
-# System prompt
+# ------------- memcore: system prompt ---------
 def load_system_prompt_plain(path=SYSTEM_PROMPT_PATH):
     if not os.path.exists(path):
         print(f"❌ No system prompt found at {path}, using fallback.")
@@ -216,7 +148,7 @@ def load_system_prompt_plain(path=SYSTEM_PROMPT_PATH):
         print(f"❌ Error reading system prompt: {e}")
         return "You are AstraMech. Be concise and factual."
 
-# Input from ears
+# ----------------- STT sound input ------------
 def record_wav(path, seconds=RECORD_SECONDS):
     print(f"🔊 Recording {seconds}s...")
     audio = sd.rec(int(seconds * SAMPLE_RATE), samplerate=SAMPLE_RATE,
@@ -225,7 +157,7 @@ def record_wav(path, seconds=RECORD_SECONDS):
     sf.write(path, audio, SAMPLE_RATE)
     print("🔈 Recorded")
 
-# Transcribe what you heard
+# ------------------ STT transcribe ------------
 def transcribe(path):
     print("🧠 Transcribing...")
     segments, _ = whisper.transcribe(path, beam_size=1, vad_filter=True)
@@ -233,7 +165,7 @@ def transcribe(path):
     print(f"🦻🏻 Heard: {text or '[EMPTY]'}")
     return text
 
-# Retrieve knowledge context database
+# ----------------------- retrieve memcore chroma ---------
 def retrieve_context(query: str, k: int = TOP_K):
     print("💡 Retrieving context from Chroma...")
     qvec = embedder.encode([query], normalize_embeddings=True).tolist()
@@ -244,7 +176,7 @@ def retrieve_context(query: str, k: int = TOP_K):
     dists = (res.get("distances") or [[]])[0]
     return list(zip(docs, metas, dists))
 
-# Robot Intent - Prompt, basically
+# ----------- Prompt maker ----------------
 def compose_prompt(user_query: str, hits: List[tuple]):
     ctx_lines = []
     for i, (doc, meta, dist) in enumerate(hits, 1):
@@ -262,7 +194,7 @@ def compose_prompt(user_query: str, hits: List[tuple]):
     )
     return full_prompt
 
-# Ask the language model
+# ---------------------- Ask the language model ------
 def ask_lmstudio(user_query: str):
     hits   = retrieve_context(user_query, k=TOP_K)
     prompt = compose_prompt(user_query, hits)
@@ -276,7 +208,7 @@ def ask_lmstudio(user_query: str):
     r.raise_for_status()
     return r.json()["choices"][0]["message"]["content"].strip()
 
-# Speaking
+# ------------------ TTS v1 ----------------
 def speak(text, out_path=None, play=True):
     print("👄 Speaking (streaming)...")
     bufs, sr, ch = [], None, 1
@@ -300,7 +232,7 @@ def speak(text, out_path=None, play=True):
         sf.write(out_path, full, sr, subtype="PCM_16")
     print("✅ Speech done.")
 
-# Did we get input?
+# ---------------------- Input check ----------------
 def should_query_llm(audio_active: bool, visual_active: bool, forced_trigger: bool) -> bool:
     """
     Returns True if we should call LM Studio for a response.
@@ -330,9 +262,8 @@ try:
             audio_active = has_audio_activity(rms, transcript)
 
             # vision
-            vision_desc, obj_count = get_multi_vision_summary()
-            visual_active = (obj_count >= MIN_VISUAL_OBJECTS)
-            print(f"👁 visual_active={visual_active} | objs={obj_count} | desc='{vision_desc}'")
+            vision_desc = get_vision_summary_from_json()
+            visual_active = has_visual_activity(vision_desc)
             print(f"👂 audio_active={audio_active}")
 
             if not (audio_active or visual_active):
@@ -362,9 +293,7 @@ try:
                 except FileNotFoundError: pass
 
             audio_active = has_audio_activity(rms, transcript)
-            vision_desc, obj_count = get_multi_vision_summary()
-            visual_active = (obj_count >= MIN_VISUAL_OBJECTS)
-            print(f"👁 visual_active={visual_active} | objs={obj_count} | desc='{vision_desc}'")
+            vision_desc = get_vision_summary_from_json()
             print(f"👂 audio_active={audio_active} | ⌨️ forced={forced_trigger}")
 
             if not should_query_llm(audio_active, visual_active, forced_trigger):
