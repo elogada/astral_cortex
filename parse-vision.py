@@ -31,7 +31,7 @@ def summarize_detection(data, max_objs=3):
         ang = d["angle_deg"]
         conf = d["confidence"] * 100
         src = d.get("source_model", "?")
-        parts.append(f"{obj} ({orient}, {ang:+.1f}°, {conf:.1f}% via )")
+        parts.append(f"{obj} ({orient}, {ang:+.1f}°, {conf:.1f}% )")
 
     joined = "; ".join(parts)
     return f"As of {ts}, I can see {joined}."

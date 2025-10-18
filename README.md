@@ -19,9 +19,7 @@
 Dependencies:
 
 * Visual C++ Redistributables 2015-2022
-* Ears and Voice: `pip install faster-whisper piper-tts sounddevice soundfile requests` 
-* Knowledge: `pip install chromadb sentence-transformers numpy`
-* Vision: `pip install ultralytics opencv-python`
+* Python dependencies `pip install faster-whisper piper-tts sounddevice soundfile requests chromadb sentence-transformers numpy ultralytics opencv-python Path datetime` 
 
 ### Basic Installation
 
@@ -31,6 +29,8 @@ Dependencies:
 1. Copy this repository's files into the `C:/astramech` folder. For example, `query.py` should be at `c:/astramech` .
 1. Start the LM Studio API server with `LFM2-1.2B` model, but rename the API dentifier as `astral_cortex`
 1. Open CMD: `cd c:/astramech && python C:/astramech/query.py`
+
+* Optional: Enable vision with `start-vision.bat`
 
 ### Notes
 

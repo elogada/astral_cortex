@@ -7,7 +7,6 @@ from sentence_transformers import SentenceTransformer
 import cv2, time
 from collections import Counter
 from ultralytics import YOLO
-from ultralytics import YOLO
 import os, tempfile
 import threading, sys, time
 import subprocess
