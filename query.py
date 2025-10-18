@@ -19,16 +19,15 @@ TTS_VOICE      = r"C:\memcore\voice.onnx"
 ASR_MODEL      = "tiny.en"
 SAMPLE_RATE    = 16000
 CHANNELS       = 1
-RECORD_SECONDS = 3
+RECORD_SECONDS = 8
 CHROMA_PATH        = r"C:\memcore\chromadb_data"
 CHROMA_COLLECTION  = None
 TOP_K              = 3
 EMBED_MODEL        = "sentence-transformers/all-MiniLM-L6-v2"
 SYSTEM_PROMPT_PATH = r"C:\memcore\system_prompt.txt"
-POLL_INTERVAL      = 5     
-AUDIO_RMS_THRESH   = 0.008  
+POLL_INTERVAL      = 1     
+AUDIO_RMS_THRESH   = 0.03  
 MIN_SILENCE_BYPASS = False
-MIN_VISUAL_OBJECTS = 1  # require at least this many detections to count as "visual activity"
 OBSERVER_MODE = False   # only talk when there's something (audio OR visual)
 CHATTER_MODE  = True  # talk even on manual trigger; still skips if you want (see logic below)
 # --------------------------------
@@ -232,7 +231,7 @@ def speak(text, out_path=None, play=True):
     print("✅ Speech done.")
 
 # ---------------------- Input check ----------------
-def should_query_llm(audio_active: bool, visual_active: bool, forced_trigger: bool) -> bool:
+def should_query_llm(audio_active: bool, forced_trigger: bool) -> bool:
     """
     Returns True if we should call LM Studio for a response.
     - OBSERVER_MODE: only when there's signal (audio OR visual)
@@ -240,9 +239,9 @@ def should_query_llm(audio_active: bool, visual_active: bool, forced_trigger: bo
     """
     if CHATTER_MODE:
         # In chatter mode, Enter can force a reply; otherwise require signal.
-        return forced_trigger or audio_active or visual_active
+        return forced_trigger or audio_active
     # Default: observer mode, only talk if there's something to talk about.
-    return audio_active or visual_active
+    return audio_active
 
 # -------- loop --------
 try:
@@ -295,7 +294,7 @@ try:
             vision_desc = get_vision_summary_from_json()
             print(f"👂 audio_active={audio_active} | ⌨️ forced={forced_trigger}")
 
-            if not should_query_llm(audio_active, visual_active, forced_trigger):
+            if not should_query_llm(audio_active, forced_trigger):
                 print("🟡 Idle → LLM skipped (no audio/visual signals).")
                 continue
 
